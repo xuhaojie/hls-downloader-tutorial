@@ -21,6 +21,7 @@ type Block struct {
 }
 
 type Task struct {
+	index          int
 	urlBase        string
 	blockNum       int
 	maxConnections int
@@ -33,8 +34,9 @@ type Task struct {
 	client         *http.Client
 }
 
-func NewTask(urlBase string, blockNum int, file string, maxConnections int) *Task {
+func NewTask(index int, urlBase string, blockNum int, file string, maxConnections int) *Task {
 	t := new(Task)
+	t.index = index
 	t.urlBase = urlBase
 	t.blockNum = blockNum
 	t.maxConnections = maxConnections
@@ -101,14 +103,14 @@ func (t *Task) Run() error {
 				fmt.Println(b.err)
 				b.retry++
 				if b.retry <= MaxRetry {
-					fmt.Printf("Block %d retry %d/3\n", b.index, b.retry)
+					fmt.Printf("[Task %d] Block %d retry %d/%d\n", t.index, b.index, b.retry, MaxRetry)
 					b.err = nil
 					go t.fetch(b)
 				} else {
-					t.endChan <- errors.New("get block failed for 3 times")
+					t.endChan <- errors.New("get block failed!")
 				}
 			} else {
-				fmt.Printf("Block %d got %d bytes.\n", b.index, len(b.data))
+				fmt.Printf("[Task %d] Block %d got %d bytes.\n", t.index, b.index, len(b.data))
 				t.connChan <- b.conn
 				t.blocks[b.index] = b
 				for i := saveIndex; i < t.blockNum; i++ {
@@ -117,7 +119,7 @@ func (t *Task) Run() error {
 						if b.index == saveIndex {
 							if b.data != nil {
 								blockSize := len(b.data)
-								fmt.Printf("Save block index %d size=%d\n", i, blockSize)
+								fmt.Printf("[Task %d] Save block index %d size=%d\n", t.index, i, blockSize)
 								_, err := f.Write(b.data)
 								if err != nil {
 									fmt.Println(err.Error())
@@ -143,19 +145,44 @@ func (t *Task) Run() error {
 	return nil
 }
 
-func main() {
+type TaskChan chan (*Task)
 
-	beginTime := time.Now()
+type TaskManager struct {
+	taskChan TaskChan
+	taskNum  int
+}
 
-	task := NewTask("https://wolongzywcdn3.com:65/20220415/3f7cISA9/", 100, "/tmp/test1.ts", 16)
-	err := task.Run()
+func NewTaskManager() *TaskManager {
+	tm := new(TaskManager)
+	tm.taskChan = make(TaskChan, 100) // 这里的100可以做成配置项
+	return tm
+}
 
-	endTime := time.Now()
-	elapsedTime := endTime.Sub(beginTime).Seconds()
-	if err != nil {
-		fmt.Printf("Task failed! %s", err)
-	} else {
-		fmt.Printf("Task finished in %0.2f second(s).\n", elapsedTime)
+func (tm *TaskManager) AddTask(urlBase string, blockNum int, file string) {
+	task := NewTask(tm.taskNum, urlBase, blockNum, file, 16) // 最大连接数需要一种方式来指定
+	tm.taskNum++
+	tm.taskChan <- task
+}
+
+func (tm *TaskManager) Run() {
+	close(tm.taskChan)
+	index := 0
+	for task := range tm.taskChan {
+		beginTime := time.Now()
+		fmt.Printf("Task %d Start...\n", task.index)
+		task.Run()
+		endTime := time.Now()
+		elapsedTime := endTime.Sub(beginTime).Seconds()
+		fmt.Printf("Task %d finishend in %0.2f second(s).\n", task.index, elapsedTime)
+		index++
 	}
+}
+
+func main() {
+	tm := NewTaskManager()
+	tm.AddTask("https://b3.szjal.cn/20190826/wro46bXJ/hls/xKH6ZqaH13780", 10, "/tmp/test1.ts")
+	tm.AddTask("https://wolongzywcdn3.com:65/20220415/3f7cISA9/", 100, "/tmp/test2.ts")
+	tm.Run()
+	fmt.Println("All task finished.")
 	fmt.Println("Done.")
 }
