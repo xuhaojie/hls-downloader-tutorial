@@ -3,7 +3,9 @@ package main
 import (
 	"fmt"
 	"io/ioutil"
+	"log"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 )
@@ -61,6 +63,25 @@ func main() {
 		go work(&blocks[i])
 	}
 	wg.Wait()
+
+	file := "/tmp/test.ts"
+	f, err := os.OpenFile(file, os.O_RDWR|os.O_CREATE, 0666)
+	defer f.Close()
+
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	fmt.Println("Writing data....")
+	for i := 0; i < blockNum; i++ {
+		if blocks[i].data != nil {
+			_, err = f.Write(blocks[i].data)
+			if err != nil {
+				log.Println(err.Error())
+			}
+		}
+	}
 
 	endTime := time.Now()
 	fmt.Println(endTime.Sub(beginTime))
