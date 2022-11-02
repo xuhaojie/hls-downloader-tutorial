@@ -15,9 +15,11 @@ type Block struct {
 }
 
 var wg = sync.WaitGroup{}
+var connChan chan int
 
 func work(b *Block) error {
 	defer wg.Done()
+	conn := <-connChan
 	b.data = nil
 	resp, err := http.Get(b.url)
 	if err != nil {
@@ -27,7 +29,7 @@ func work(b *Block) error {
 
 	defer resp.Body.Close()
 
-	fmt.Printf("get %s %d\n", b.url, resp.StatusCode)
+	fmt.Printf("[%02d] get %s %d\n", conn, b.url, resp.StatusCode)
 	if resp.StatusCode == 200 {
 		body, err := ioutil.ReadAll(resp.Body)
 		if err != nil {
@@ -36,15 +38,20 @@ func work(b *Block) error {
 		}
 		b.data = body
 	}
+	connChan <- conn
 	return err
 }
 
 func main() {
 	beginTime := time.Now()
-
 	var urlBase = "https://wolongzywcdn3.com:65/20220415/3f7cISA9/"
-	const blockNum = 3335
+	const blockNum = 100 //3335
 	blocks := make([]Block, blockNum)
+	const maxConnections = 32
+	connChan = make(chan int, maxConnections)
+	for i := 0; i < maxConnections; i++ {
+		connChan <- i
+	}
 
 	wg.Add(blockNum)
 	for i := 0; i < blockNum; i++ {
