@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"sync"
 	"time"
 )
 
@@ -13,7 +14,10 @@ type Block struct {
 	data  []byte
 }
 
+var wg = sync.WaitGroup{}
+
 func work(b *Block) error {
+	defer wg.Done()
 	b.data = nil
 	resp, err := http.Get(b.url)
 	if err != nil {
@@ -38,16 +42,18 @@ func work(b *Block) error {
 func main() {
 	beginTime := time.Now()
 
-	urlBase := "https://wolongzywcdn3.com:65/20220415/3f7cISA9/"
+	var urlBase = "https://wolongzywcdn3.com:65/20220415/3f7cISA9/"
 	const blockNum = 3335
 	blocks := make([]Block, blockNum)
 
+	wg.Add(blockNum)
 	for i := 0; i < blockNum; i++ {
 		url := urlBase + fmt.Sprintf("0%d", i) + ".ts"
 		blocks[i].index = i
 		blocks[i].url = url
 		go work(&blocks[i])
 	}
+	wg.Wait()
 
 	endTime := time.Now()
 	fmt.Println(endTime.Sub(beginTime))
