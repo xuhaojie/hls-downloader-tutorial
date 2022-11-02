@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -10,59 +11,86 @@ import (
 	"time"
 )
 
+const MaxRetry = 3
+
 type Block struct {
 	index int
 	url   string
+	retry int
+	err   error
 	data  []byte
 }
 
 var wg = sync.WaitGroup{}
 var connChan chan int
 
-func work(b *Block) error {
+func work(b *Block) {
 	defer wg.Done()
 	conn := <-connChan
-	b.data = nil
-	resp, err := http.Get(b.url)
-	if err != nil {
-		fmt.Println(err)
-		return err
-	}
-
-	defer resp.Body.Close()
-
-	fmt.Printf("[%02d] get %s %d\n", conn, b.url, resp.StatusCode)
-	if resp.StatusCode == 200 {
-		body, err := ioutil.ReadAll(resp.Body)
+	for b.retry < MaxRetry {
+		b.retry++
+		b.data = nil
+		resp, err := http.Get(b.url)
 		if err != nil {
+			b.data = nil
+			b.err = err
 			fmt.Println(err)
-			return err
+		} else {
+
+			fmt.Printf("[%02d] get %s %d\n", conn, b.url, resp.StatusCode)
+			if resp.StatusCode == 200 {
+				defer resp.Body.Close()
+				body, err := ioutil.ReadAll(resp.Body)
+				if err != nil {
+					b.data = nil
+					b.err = err
+					fmt.Println(err)
+				} else {
+					b.data = body
+					break
+				}
+			} else {
+				b.err = errors.New(fmt.Sprintf("http %d", resp.StatusCode))
+			}
 		}
-		b.data = body
+	}
+	if b.err == nil {
+		fmt.Printf("[%02d] finished\n", conn)
+	} else {
+		fmt.Printf("[%02d] failed! %s\n", conn, b.err)
 	}
 	connChan <- conn
-	return err
+	return
 }
 
 func main() {
 	beginTime := time.Now()
 	var urlBase = "https://wolongzywcdn3.com:65/20220415/3f7cISA9/"
-	const blockNum = 100 //3335
+	const blockNum = 100
 	blocks := make([]Block, blockNum)
 	const maxConnections = 32
 	connChan = make(chan int, maxConnections)
+
 	for i := 0; i < maxConnections; i++ {
 		connChan <- i
 	}
 
 	wg.Add(blockNum)
 	for i := 0; i < blockNum; i++ {
-		url := urlBase + fmt.Sprintf("0%d", i) + ".ts"
+		url := urlBase + fmt.Sprintf("0%d", i+1580) + ".ts"
+		blocks[i].retry = 0
 		blocks[i].index = i
 		blocks[i].url = url
 		go work(&blocks[i])
 	}
 	wg.Wait()
+
+	for i := 0; i < blockNum; i++ {
+		if blocks[i].err != nil {
+			log.Println("Task failed due to block ", i, blocks[i].err.Error())
+			return
+		}
+	}
 
 	file := "/tmp/test.ts"
 	f, err := os.OpenFile(file, os.O_RDWR|os.O_CREATE, 0666)
