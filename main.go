@@ -148,13 +148,16 @@ func (t *Task) Run() error {
 type TaskChan chan (*Task)
 
 type TaskManager struct {
-	taskChan TaskChan
-	taskNum  int
+	taskChan      TaskChan
+	taskNum       int
+	finishChan    TaskChan
+	finishedTasks int
 }
 
 func NewTaskManager() *TaskManager {
 	tm := new(TaskManager)
 	tm.taskChan = make(TaskChan, 100) // 这里的100可以做成配置项
+	tm.finishChan = make(TaskChan, 100)
 	return tm
 }
 
@@ -165,23 +168,41 @@ func (tm *TaskManager) AddTask(urlBase string, blockNum int, file string) {
 }
 
 func (tm *TaskManager) Run() {
-	close(tm.taskChan)
-	index := 0
-	for task := range tm.taskChan {
-		beginTime := time.Now()
-		fmt.Printf("Task %d Start...\n", task.index)
-		task.Run()
-		endTime := time.Now()
-		elapsedTime := endTime.Sub(beginTime).Seconds()
-		fmt.Printf("Task %d finishend in %0.2f second(s).\n", task.index, elapsedTime)
-		index++
+
+	for {
+		select {
+		case task := <-tm.taskChan:
+			fmt.Printf("Task %d start.\n", task.index)
+			go func() error {
+				beginTime := time.Now()
+				err := task.Run()
+				endTime := time.Now()
+				elapsedTime := endTime.Sub(beginTime).Seconds()
+
+				if err != nil {
+					fmt.Printf("Task %d failed due to %s.\n", task.index, err)
+				} else {
+					fmt.Printf("Task %d finishend in %0.2f second(s).\n", task.index, elapsedTime)
+				}
+				tm.finishChan <- task
+				return err
+			}()
+		case <-tm.finishChan:
+
+			tm.finishedTasks++
+			if tm.finishedTasks >= tm.taskNum {
+				return
+			}
+			//case <- time.After(time.Second*3):
+			//	fmt.Printf("time out")
+		}
 	}
 }
 
 func main() {
 	tm := NewTaskManager()
 	tm.AddTask("https://b3.szjal.cn/20190826/wro46bXJ/hls/xKH6ZqaH13780", 10, "/tmp/test1.ts")
-	tm.AddTask("https://wolongzywcdn3.com:65/20220415/3f7cISA9/", 100, "/tmp/test2.ts")
+	tm.AddTask("https://wolongzywcdn3.com:65//20220415/3f7cISA9/", 100, "/tmp/test2.ts")
 	tm.Run()
 	fmt.Println("All task finished.")
 	fmt.Println("Done.")
